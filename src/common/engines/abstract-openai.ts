@@ -145,7 +145,74 @@ export abstract class AbstractOpenAI extends AbstractEngine {
             body['messages'] = messages
         }
         let finished = false // finished can be called twice because event.data is 1. "finish_reason":"stop"; 2. [DONE]
-        let hasEmittedText = false
+        let hasEmittedDelta = false
+        let hasSentFullText = false
+
+        const collectTextFromDelta = (value: unknown): string => {
+            if (!value) {
+                return ''
+            }
+            if (typeof value === 'string') {
+                return value
+            }
+            if (Array.isArray(value)) {
+                return value.map((item) => collectTextFromDelta(item)).join('')
+            }
+            if (typeof value === 'object') {
+                const valueObj = value as Record<string, unknown>
+                if (typeof valueObj.text === 'string') {
+                    return valueObj.text
+                }
+                const nestedKeys = ['delta', 'content', 'value'] as const
+                for (const key of nestedKeys) {
+                    const nested = valueObj[key]
+                    const nestedText = collectTextFromDelta(nested)
+                    if (nestedText) {
+                        return nestedText
+                    }
+                }
+            }
+            return ''
+        }
+
+        const collectFullText = (responsePayload: Record<string, unknown>): string => {
+            if (!responsePayload) {
+                return ''
+            }
+            const outputText = responsePayload.output_text
+            if (typeof outputText === 'string') {
+                return outputText
+            }
+            const output = responsePayload.output
+            if (Array.isArray(output)) {
+                return output
+                    .map((item) => {
+                        if (!item || typeof item !== 'object') {
+                            return ''
+                        }
+                        const itemObj = item as Record<string, unknown>
+                        if (typeof itemObj.text === 'string') {
+                            return itemObj.text
+                        }
+                        return collectTextFromDelta(itemObj.content)
+                    })
+                    .join('')
+            }
+            return ''
+        }
+
+        const emitMessage = async (content: string, options?: { role?: string; isFullText?: boolean }) => {
+            if (!content) {
+                return
+            }
+            const { role = '', isFullText } = options ?? {}
+            await req.onMessage({
+                content,
+                role,
+                ...(isFullText ? { isFullText: true } : {}),
+            })
+        }
+
         await fetchSSE(url, {
             method: 'POST',
             headers,
@@ -336,6 +403,64 @@ export abstract class AbstractOpenAI extends AbstractEngine {
 
                 if (x_groq && x_groq.error) {
                     req.onError?.(x_groq.error)
+                }
+
+                const { type } = resp
+
+                if (typeof type === 'string' && type.startsWith('response.')) {
+                    const responsePayload = (resp.response ?? {}) as Record<string, unknown>
+                    const role = typeof responsePayload.role === 'string' ? responsePayload.role : ''
+
+                    if (
+                        type === 'response.delta' ||
+                        type === 'response.output_text.delta' ||
+                        type === 'response.refusal.delta'
+                    ) {
+                        const candidateDeltaSources: unknown[] = [
+                            resp.delta,
+                            responsePayload.delta,
+                            responsePayload.output_text_delta,
+                        ]
+
+                        for (const candidate of candidateDeltaSources) {
+                            const deltaText = collectTextFromDelta(candidate)
+                            if (deltaText) {
+                                hasEmittedDelta = true
+                                await emitMessage(deltaText, { role })
+                            }
+                        }
+                        return
+                    }
+
+                    if (
+                        (type === 'response.output_text.done' || type === 'response.completed') &&
+                        !hasEmittedDelta &&
+                        !hasSentFullText
+                    ) {
+                        const fullText = collectFullText(responsePayload)
+                        if (fullText) {
+                            hasSentFullText = true
+                            await emitMessage(fullText, { role, isFullText: true })
+                        }
+                    }
+
+                    if (type === 'response.completed') {
+                        req.onFinished('stop')
+                        finished = true
+                        return
+                    }
+
+                    if (type === 'response.failed' || type === 'response.error') {
+                        const errorMessage =
+                            (typeof resp.error?.message === 'string' && resp.error.message) ||
+                            (typeof resp.error === 'string' && resp.error) ||
+                            'Unknown error'
+                        req.onError?.(errorMessage)
+                        finished = true
+                        return
+                    }
+
+                    return
                 }
 
                 const { choices } = resp
