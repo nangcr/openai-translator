@@ -1216,7 +1216,7 @@ function InnerTranslator(props: IInnerTranslatorProps) {
         if (!settings) {
             return
         }
-        if (settings.provider === 'OpenAI' && !settings.apiKeys) {
+        if ((settings.provider === 'OpenAI' || settings.provider === 'Responses') && !settings.apiKeys) {
             setShowSettings(true)
             return
         }

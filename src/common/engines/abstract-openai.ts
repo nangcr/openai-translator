@@ -104,11 +104,26 @@ export abstract class AbstractOpenAI extends AbstractEngine {
     }
 
     async sendMessage(req: IMessageRequest): Promise<void> {
-        const url = urlJoin(await this.getAPIURL(), await this.getAPIURLPath())
+        const apiURL = await this.getAPIURL()
+        const apiURLPath = await this.getAPIURLPath()
+        const url = urlJoin(apiURL, apiURLPath)
         const headers = await this.getHeaders()
         const isChatAPI = await this.isChatAPI()
         const body = await this.getBaseRequestBody()
-        if (!isChatAPI) {
+        const settings = await getSettings()
+        const useResponsesAPI = apiURLPath.includes('/responses') || settings.provider === 'Responses'
+        if (useResponsesAPI) {
+            body['input'] = req.commandPrompt
+            if (req.rolePrompt) {
+                body['instructions'] = req.rolePrompt
+            }
+            if (!body['modalities']) {
+                body['modalities'] = ['text']
+            }
+            delete body['messages']
+            delete body['prompt']
+            delete body['stop']
+        } else if (!isChatAPI) {
             // Azure OpenAI Service supports multiple API.
             // We should check if the settings.apiURLPath is match `/deployments/{deployment-id}/chat/completions`.
             // If not, we should use the legacy parameters.
@@ -205,6 +220,170 @@ export abstract class AbstractOpenAI extends AbstractEngine {
             signal: req.signal,
             onMessage: async (msg) => {
                 if (finished) return
+                if (useResponsesAPI) {
+                    const trimmed = msg.trim()
+                    if (!trimmed) {
+                        return
+                    }
+                    if (trimmed === '[DONE]') {
+                        req.onFinished('stop')
+                        finished = true
+                        return
+                    }
+
+                    let resp
+                    try {
+                        resp = JSON.parse(trimmed)
+                        // eslint-disable-next-line no-empty, @typescript-eslint/no-explicit-any
+                    } catch (e: any) {
+                        req.onError?.(e?.message ?? 'Cannot parse response JSON')
+
+                        req.onFinished('stop')
+                        finished = true
+                        return
+                    }
+
+                    const responsePayload = resp.response ?? resp.data ?? resp
+                    const eventType: string | undefined =
+                        resp.type ??
+                        resp.event ??
+                        responsePayload?.type ??
+                        responsePayload?.event ??
+                        responsePayload?.event_type
+
+                    const errorPayload = resp.error ?? responsePayload?.error
+                    const toErrorMessage = (value: unknown): string | undefined => {
+                        if (!value) {
+                            return undefined
+                        }
+                        if (typeof value === 'string') {
+                            return value
+                        }
+                        if (typeof value === 'object') {
+                            const message = (value as { message?: unknown }).message
+                            if (typeof message === 'string') {
+                                return message
+                            }
+                            try {
+                                return JSON.stringify(value)
+                            } catch {
+                                return String(value)
+                            }
+                        }
+                        return String(value)
+                    }
+
+                    if (eventType === 'response.error' || errorPayload) {
+                        const errorMessage = toErrorMessage(errorPayload ?? resp)
+                        if (errorMessage) {
+                            req.onError?.(errorMessage)
+                        }
+                        req.onFinished('error')
+                        finished = true
+                        return
+                    }
+
+                    const shouldIncludeOutput =
+                        !hasEmittedText &&
+                        (eventType === 'response.completed' ||
+                            responsePayload?.status === 'completed' ||
+                            responsePayload?.status === 'complete')
+
+                    const visited = new WeakSet<object>()
+                    const emitCandidates = async (value: unknown): Promise<void> => {
+                        if (!value) {
+                            return
+                        }
+                        if (typeof value === 'string') {
+                            if (value) {
+                                hasEmittedText = true
+                                await req.onMessage({ content: value, role: 'assistant' })
+                            }
+                            return
+                        }
+                        if (Array.isArray(value)) {
+                            for (const item of value) {
+                                await emitCandidates(item)
+                            }
+                            return
+                        }
+                        if (typeof value === 'object') {
+                            if (visited.has(value as object)) {
+                                return
+                            }
+                            visited.add(value as object)
+                            const obj = value as Record<string, unknown>
+                            const keys: Array<keyof typeof obj> = [
+                                'text',
+                                'content',
+                                'delta',
+                                'output_text',
+                                'output_text_delta',
+                                'value',
+                            ]
+                            for (const key of keys) {
+                                if (key in obj) {
+                                    await emitCandidates(obj[key])
+                                }
+                            }
+                        }
+                    }
+
+                    const emitOutput = async (output: unknown, includeFullOutput: boolean) => {
+                        if (!output) {
+                            return
+                        }
+                        if (Array.isArray(output)) {
+                            for (const item of output) {
+                                if (!item || typeof item !== 'object') {
+                                    continue
+                                }
+                                const type = (item as { type?: unknown }).type
+                                if (includeFullOutput || (typeof type === 'string' && type.includes('delta'))) {
+                                    await emitCandidates(item)
+                                }
+                            }
+                            return
+                        }
+                        await emitCandidates(output)
+                    }
+
+                    await emitCandidates(resp.delta)
+                    await emitCandidates(responsePayload?.delta)
+                    await emitCandidates(responsePayload?.output_text_delta)
+                    if (shouldIncludeOutput) {
+                        await emitCandidates(resp.output_text)
+                        await emitCandidates(responsePayload?.output_text)
+                        await emitOutput(responsePayload?.output, true)
+                    } else if (eventType === 'response.delta' || eventType === 'response.output_text.delta') {
+                        await emitCandidates(responsePayload?.output_text)
+                        await emitOutput(responsePayload?.output, false)
+                    }
+
+                    if (
+                        eventType === 'response.completed' ||
+                        responsePayload?.status === 'completed' ||
+                        responsePayload?.status === 'complete'
+                    ) {
+                        req.onFinished('stop')
+                        finished = true
+                        return
+                    }
+
+                    if (eventType === 'response.cancelled' || responsePayload?.status === 'cancelled') {
+                        req.onFinished('cancelled')
+                        finished = true
+                        return
+                    }
+
+                    if (eventType === 'response.failed' || responsePayload?.status === 'failed') {
+                        req.onFinished('error')
+                        finished = true
+                        return
+                    }
+
+                    return
+                }
                 let resp
                 try {
                     resp = JSON.parse(msg)

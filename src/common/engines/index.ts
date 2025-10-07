@@ -28,6 +28,7 @@ import { DeepSeek } from './deepseek'
 
 export type Provider =
     | 'OpenAI'
+    | 'Responses'
     | 'ChatGPT'
     | 'Azure'
     | 'MiniMax'
@@ -43,6 +44,7 @@ export type Provider =
 
 export const engineIcons: Record<Provider, IconType> = {
     OpenAI: RiOpenaiFill,
+    Responses: RiOpenaiFill,
     ChatGPT: RiOpenaiFill,
     Azure: VscAzureDevops,
     MiniMax: GiArtificialIntelligence,
@@ -59,6 +61,7 @@ export const engineIcons: Record<Provider, IconType> = {
 
 export const providerToEngine: Record<Provider, { new (): IEngine }> = {
     OpenAI: OpenAI,
+    Responses: OpenAI,
     ChatGPT: ChatGPT,
     Azure: Azure,
     MiniMax: MiniMax,
