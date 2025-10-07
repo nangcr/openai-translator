@@ -155,6 +155,10 @@ For details, see [Desktop Clip Extension](./CLIP-EXTENSIONS.md)
 
 3. Refresh the page in the browser to enjoy the smooth translation experience 🎉!
 
+### Using the OpenAI Responses API
+
+If you prefer OpenAI's newer Responses API, open the settings panel and choose **OpenAI Responses** as the default provider (or set the API URL Path to `/v1/responses`). OpenAI Translator will automatically build `input`/`modalities` requests and stream updates using the Responses event schema.
+
 ## Configure Azure OpenAI Service
 
 ```ts

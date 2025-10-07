@@ -1272,7 +1272,7 @@ const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAd
                 {item.label}
             </div>
         )
-        if (item.id === 'OpenAI') {
+        if (item.id === 'OpenAI' || item.id === 'Responses') {
             label = (
                 <div
                     style={{
@@ -1283,7 +1283,7 @@ const addProviderIcons = ({ options, currentProvider, hasPromotion, theme }: IAd
                     }}
                 >
                     {label}
-                    {hasPromotion && currentProvider !== 'OpenAI' && (
+                    {hasPromotion && currentProvider !== 'OpenAI' && currentProvider !== 'Responses' && (
                         <div
                             style={{
                                 width: '0.45rem',
@@ -1314,7 +1314,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
     const { t } = useTranslation()
 
     let overrides: SelectProps['overrides'] = undefined
-    if (hasPromotion && value !== 'OpenAI') {
+    if (hasPromotion && value !== 'OpenAI' && value !== 'Responses') {
         overrides = {
             ControlContainer: {
                 style: {
@@ -1327,6 +1327,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
     const options = utils.isDesktopApp()
         ? ([
               { label: 'OpenAI', id: 'OpenAI' },
+              { label: 'OpenAI Responses', id: 'Responses' },
               { label: 'Claude', id: 'Claude' },
               { label: `Kimi (${t('Free')})`, id: 'Kimi' },
               { label: `${t('ChatGLM')} (${t('Free')})`, id: 'ChatGLM' },
@@ -1345,6 +1346,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
           }[])
         : ([
               { label: 'OpenAI', id: 'OpenAI' },
+              { label: 'OpenAI Responses', id: 'Responses' },
               { label: 'Claude', id: 'Claude' },
               { label: `Kimi (${t('Free')})`, id: 'Kimi' },
               { label: `${t('ChatGLM')} (${t('Free')})`, id: 'ChatGLM' },
@@ -1375,7 +1377,7 @@ function ProviderSelector({ value, onChange, hasPromotion }: IProviderSelectorPr
                 ]
             }
             onChange={(params) => {
-                onChange?.(params.value[0].id as Provider | 'OpenAI')
+                onChange?.(params.value[0].id as Provider)
             }}
             options={addProviderIcons({
                 options,
@@ -1750,7 +1752,7 @@ export function InnerSettings({
         setPromotionNeverDisplay: setHeaderPromotionNeverDisplay,
     } = usePromotionNeverDisplay(headerPromotion)
 
-    const isOpenAI = values.provider === 'OpenAI'
+    const isOpenAI = values.provider === 'OpenAI' || values.provider === 'Responses'
 
     useEffect(() => {
         if (isOpenAI) {
@@ -2468,11 +2470,11 @@ export function InnerSettings({
                         </div>
                         <div
                             style={{
-                                display: values.provider === 'OpenAI' ? 'block' : 'none',
+                                display: isOpenAI ? 'block' : 'none',
                             }}
                         >
                             <FormItem
-                                required={values.provider === 'OpenAI'}
+                                required={isOpenAI}
                                 name='apiKeys'
                                 label={t('API Key')}
                                 caption={
@@ -2555,7 +2557,7 @@ export function InnerSettings({
                             >
                                 <MyCheckbox onBlur={onBlur} />
                             </FormItem>
-                            <FormItem name='apiModel' label={t('API Model')} required={values.provider === 'OpenAI'}>
+                            <FormItem name='apiModel' label={t('API Model')} required={isOpenAI}>
                                 <APIModelSelector
                                     provider='OpenAI'
                                     currentProvider={values.provider}
@@ -2571,19 +2573,15 @@ export function InnerSettings({
                                 <FormItem
                                     name='customModelName'
                                     label={t('Custom Model Name')}
-                                    required={values.provider === 'OpenAI' && values.apiModel === CUSTOM_MODEL_ID}
+                                    required={isOpenAI && values.apiModel === CUSTOM_MODEL_ID}
                                 >
                                     <Input autoComplete='off' size='compact' />
                                 </FormItem>
                             </div>
-                            <FormItem name='apiURL' label={t('API URL')} required={values.provider === 'OpenAI'}>
+                            <FormItem name='apiURL' label={t('API URL')} required={isOpenAI}>
                                 <Input size='compact' onBlur={onBlur} />
                             </FormItem>
-                            <FormItem
-                                name='apiURLPath'
-                                label={t('API URL Path')}
-                                required={values.provider === 'OpenAI'}
-                            >
+                            <FormItem name='apiURLPath' label={t('API URL Path')} required={isOpenAI}>
                                 <Input size='compact' />
                             </FormItem>
                         </div>

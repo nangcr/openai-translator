@@ -9,6 +9,7 @@ import { commands } from '@/tauri/bindings'
 
 export const defaultAPIURL = 'https://api.openai.com'
 export const defaultAPIURLPath = '/v1/chat/completions'
+export const defaultResponsesAPIURLPath = '/v1/responses'
 export const defaultProvider = 'OpenAI'
 export const defaultAPIModel = 'gpt-3.5-turbo'
 
@@ -125,14 +126,14 @@ export async function getSettings(): Promise<ISettings> {
     if (!settings.apiURL) {
         settings.apiURL = defaultAPIURL
     }
-    if (!settings.apiURLPath) {
-        settings.apiURLPath = defaultAPIURLPath
+    if (!settings.provider) {
+        settings.provider = defaultProvider
+    }
+    if (!settings.apiURLPath || (settings.provider === 'Responses' && settings.apiURLPath === defaultAPIURLPath)) {
+        settings.apiURLPath = settings.provider === 'Responses' ? defaultResponsesAPIURLPath : defaultAPIURLPath
     }
     if (!settings.apiModel) {
         settings.apiModel = defaultAPIModel
-    }
-    if (!settings.provider) {
-        settings.provider = defaultProvider
     }
     if (settings.autoTranslate === undefined || settings.autoTranslate === null) {
         settings.autoTranslate = defaultAutoTranslate
